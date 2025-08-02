@@ -5,7 +5,9 @@ import ColorSelector from './components/ColorSelector';
 import LocationButton from './components/LocationButton';
 import PointsTable from './components/PointsTable';
 import CSVDownload from './components/CSVDownload';
-import { MapPoint, MarkerColor } from './types';
+import EditPointModal from './components/EditPointModal';
+import PathManager from './components/PathManager';
+import { MapPoint, MarkerColor, Node, Path, EditPointData } from './types';
 
 function App() {
   // State management for the application
@@ -13,6 +15,12 @@ function App() {
   const [selectedColor, setSelectedColor] = useState<MarkerColor>('blue');
   const [nextId, setNextId] = useState(1);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
+  
+  // New state for editing and path management
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingPoint, setEditingPoint] = useState<EditPointData | null>(null);
+  const [paths, setPaths] = useState<Path[]>([]);
+  const [nextNodeId, setNextNodeId] = useState(75); // Start from A75
 
   // Handle map clicks to add new points
   const handleMapClick = useCallback((lat: number, lng: number) => {
@@ -40,6 +48,25 @@ function App() {
     });
   }, []);
 
+  // Handle point editing
+  const handleEditPoint = useCallback((point: EditPointData) => {
+    setEditingPoint(point);
+    setIsEditModalOpen(true);
+  }, []);
+
+  // Handle save edited point
+  const handleSaveEditedPoint = useCallback((updatedPoint: EditPointData) => {
+    setPoints(prevPoints => 
+      prevPoints.map(point => 
+        point.id === updatedPoint.id 
+          ? { ...point, ...updatedPoint }
+          : point
+      )
+    );
+    setIsEditModalOpen(false);
+    setEditingPoint(null);
+  }, []);
+
   // Handle color selection change
   const handleColorChange = useCallback((color: MarkerColor) => {
     setSelectedColor(color);
@@ -49,6 +76,58 @@ function App() {
   const handleLocationFound = useCallback((lat: number, lng: number) => {
     setMapCenter([lat, lng]);
   }, []);
+
+  // Handle point click on map
+  const handlePointClick = useCallback((point: MapPoint) => {
+    console.log('Point clicked:', point);
+  }, []);
+
+  // Convert points to nodes for export
+  const getNodes = useCallback((): Node[] => {
+    return points
+      .filter(point => point.nodeId)
+      .map(point => ({
+        id: point.nodeId!,
+        lat: point.latitude,
+        lon: point.longitude,
+        colour: point.color,
+      }));
+  }, [points]);
+
+  // Handle save data
+  const handleSaveData = useCallback(() => {
+    const nodes = getNodes();
+    const dataToSave = {
+      nodes: nodes,
+      paths: paths,
+    };
+
+    // Create JSON files for download
+    const nodesBlob = new Blob([JSON.stringify(nodes, null, 2)], { type: 'application/json' });
+    const pathsBlob = new Blob([JSON.stringify(paths, null, 2)], { type: 'application/json' });
+
+    // Download road_path.json (nodes)
+    const nodesUrl = URL.createObjectURL(nodesBlob);
+    const nodesLink = document.createElement('a');
+    nodesLink.href = nodesUrl;
+    nodesLink.download = 'road_path.json';
+    document.body.appendChild(nodesLink);
+    nodesLink.click();
+    document.body.removeChild(nodesLink);
+    URL.revokeObjectURL(nodesUrl);
+
+    // Download edges_with_distances.json (paths)
+    const pathsUrl = URL.createObjectURL(pathsBlob);
+    const pathsLink = document.createElement('a');
+    pathsLink.href = pathsUrl;
+    pathsLink.download = 'edges_with_distances.json';
+    document.body.appendChild(pathsLink);
+    pathsLink.click();
+    document.body.removeChild(pathsLink);
+    URL.revokeObjectURL(pathsUrl);
+
+    console.log('Data saved:', dataToSave);
+  }, [getNodes, paths]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -111,24 +190,35 @@ function App() {
             selectedColor={selectedColor}
             onMapClick={handleMapClick}
             mapCenter={mapCenter}
+            paths={paths}
+            onPointClick={handlePointClick}
           />
         </div>
 
-        {/* Controls Section - Moved up */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6" style={{ display: 'none' }}>
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-            <ColorSelector
-              selectedColor={selectedColor}
-              onColorChange={handleColorChange}
-            />
-            <CSVDownload points={points} />
-          </div>
-        </div>
+        {/* Path Management Section */}
+        <PathManager
+          nodes={getNodes()}
+          paths={paths}
+          onPathsChange={setPaths}
+          onSave={handleSaveData}
+        />
 
         {/* Table Section */}
         <PointsTable
           points={points}
           onDeletePoint={handleDeletePoint}
+          onEditPoint={handleEditPoint}
+        />
+
+        {/* Edit Modal */}
+        <EditPointModal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setEditingPoint(null);
+          }}
+          point={editingPoint}
+          onSave={handleSaveEditedPoint}
         />
 
         {/* Instructions */}
@@ -138,8 +228,10 @@ function App() {
             <p>• Click 'Get Current Location' to automatically center the map on your position</p>
             <p>• Select your preferred marker color (pink or blue) from the dropdown</p>
             <p>• Click anywhere on the map to record a point at that location</p>
-            <p>• View all recorded points in the table below with their coordinates</p>
-            <p>• Delete individual points using the delete button in each row</p>
+            <p>• Edit points in the table to assign Node IDs (e.g., A75, A76)</p>
+            <p>• Use the Path Manager to create connections between nodes</p>
+            <p>• Click on map markers to see their connections</p>
+            <p>• Save your data to get road_path.json and edges_with_distances.json files</p>
             <p>• Download all your recorded points as a CSV file for external use</p>
           </div>
         </div>
